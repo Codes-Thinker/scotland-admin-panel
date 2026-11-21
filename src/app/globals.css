@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --lime: #8fbf1f;
+  --lime-soft: #b8d83a;
+  --lime-wash: #f4f9d8;
+  --blue: #2563eb;
+  --ink: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --surface: #f7f8fa;
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  max-width: 100%;
+  /* do NOT set overflow-x:hidden here — it breaks fixed/sticky sidebars */
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition;
+}
+.btn-lime {
+  @apply btn bg-[#8FBF1F] text-white hover:bg-[#7aa819];
+}
+.btn-blue {
+  @apply btn bg-[#2563EB] text-white hover:bg-[#1d4ed8];
+}
+.btn-ghost {
+  @apply btn border border-slate-200 bg-white text-slate-700 hover:bg-slate-50;
+}
+.btn-danger {
+  @apply btn border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100;
+}
+.badge {
+  @apply inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+.card {
+  @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+}
+.input {
+  @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#8FBF1F];
+}
+.select {
+  @apply rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#2563EB];
+}
