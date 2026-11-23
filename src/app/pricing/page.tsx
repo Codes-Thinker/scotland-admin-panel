@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { api } from "@/lib/api";
 import { runAction, useApi } from "@/lib/use-api";
@@ -74,22 +74,19 @@ function toPayload(rows: FormRow[]): { rules: object[] } | string {
 
 export default function PricingPage() {
   const rules = useApi<RuleRow[]>("/admin/pricing");
-  const [rows, setRows] = useState<FormRow[]>([]);
-  const [dirty, setDirty] = useState(false);
+  // Rows as the server has them, and the operator's unsaved edits (null when there are none).
+  const saved = useMemo<FormRow[]>(() => {
+    if (!rules.data) return [];
+    return [...rules.data].sort((a, b) => ORDER.indexOf(a.rideType) - ORDER.indexOf(b.rideType)).map(toForm);
+  }, [rules.data]);
+  const [edits, setEdits] = useState<FormRow[] | null>(null);
+  const rows = edits ?? saved;
+  const dirty = edits !== null;
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (rules.data) {
-      const sorted = [...rules.data].sort((a, b) => ORDER.indexOf(a.rideType) - ORDER.indexOf(b.rideType));
-      setRows(sorted.map(toForm));
-      setDirty(false);
-    }
-  }, [rules.data]);
-
   function update(index: number, patch: Partial<FormRow>) {
-    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
-    setDirty(true);
+    setEdits((prev) => (prev ?? saved).map((r, i) => (i === index ? { ...r, ...patch } : r)));
     setNotice(null);
   }
 
@@ -106,6 +103,7 @@ export default function PricingPage() {
       setNotice({ tone: "error", text: error });
       return;
     }
+    setEdits(null);
     setNotice({ tone: "ok", text: "Saved. New rides are priced with these rules; past fares are unchanged." });
     rules.reload();
   }

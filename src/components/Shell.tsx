@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { currentUser, logout, type ApiUser } from "@/lib/api";
+import { useEffect, useSyncExternalStore } from "react";
+import { currentUser, logout } from "@/lib/api";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { Sidebar } from "./Sidebar";
 
@@ -19,14 +19,18 @@ export function Shell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [user, setUser] = useState<ApiUser | null | undefined>(undefined);
+  // The session lives outside React (sessionStorage), so read it through the store hook.
+  // undefined = not checked yet (server render and first client paint).
+  const user = useSyncExternalStore(
+    () => () => undefined,
+    () => currentUser(),
+    () => undefined,
+  );
 
   // Signed-out visitors go to the login page. Nothing renders until the session is checked.
   useEffect(() => {
-    const u = currentUser();
-    setUser(u);
-    if (!u) router.replace("/login");
-  }, [router]);
+    if (user === null) router.replace("/login");
+  }, [user, router]);
 
   if (!user) {
     return <div className="min-h-screen bg-[#F7F8FA]" aria-busy="true" />;

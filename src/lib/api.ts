@@ -81,7 +81,22 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message);
 }
 
-async function refresh(): Promise<boolean> {
+/**
+ * Refreshes the session. Concurrent callers share one request: the server rotates refresh
+ * tokens and treats a reused one as theft, so two parallel refreshes would end the session.
+ */
+let refreshing: Promise<boolean> | null = null;
+
+function refresh(): Promise<boolean> {
+  if (!refreshing) {
+    refreshing = doRefresh().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
+async function doRefresh(): Promise<boolean> {
   const current = session;
   if (!current) return false;
   const res = await fetch(`${API_URL}/auth/refresh`, {
@@ -98,21 +113,32 @@ async function refresh(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Re-authenticates after a 401. Refreshes only if the rejected token is still the current one;
+ * otherwise another request already refreshed and this one can simply retry.
+ */
+async function recover(rejectedToken: string | undefined): Promise<boolean> {
+  if (!session) return false;
+  if (bearer() !== rejectedToken) return true;
+  return refresh();
+}
+
 /** Calls the API as the signed-in admin. Retries once after refreshing an expired access token. */
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const send = () =>
+  const send = (token: string | undefined) =>
     fetch(`${API_URL}${path}`, {
       method: init.method ?? "GET",
       headers: {
         ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
-        ...(bearer() ? { Authorization: `Bearer ${bearer()}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
 
-  let res = await send();
-  if (res.status === 401 && session && (await refresh())) {
-    res = await send();
+  const used = bearer();
+  let res = await send(used);
+  if (res.status === 401 && (await recover(used))) {
+    res = await send(bearer());
   }
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
@@ -122,10 +148,11 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 /** Downloads an uploaded driver document with the admin's token, returning a local object URL. */
 export async function documentUrl(driverId: string, type: string): Promise<string> {
   const path = `/admin/drivers/${driverId}/documents/${type}/file`;
-  const send = () =>
-    fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${bearer() ?? ""}` } });
-  let res = await send();
-  if (res.status === 401 && (await refresh())) res = await send();
+  const send = (token: string | undefined) =>
+    fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token ?? ""}` } });
+  const used = bearer();
+  let res = await send(used);
+  if (res.status === 401 && (await recover(used))) res = await send(bearer());
   if (!res.ok) throw await parseError(res);
   return URL.createObjectURL(await res.blob());
 }

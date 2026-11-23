@@ -3,40 +3,56 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 
-interface State<T> {
+interface Result<T> {
+  /** Which request produced this result (path plus reload counter). */
+  key: string;
+  /** Last successful data, kept while a newer request is in flight. */
+  data: T | undefined;
+  error: string | null;
+}
+
+export interface ApiState<T> {
   data: T | undefined;
   error: string | null;
   loading: boolean;
+  reload: () => void;
 }
 
 /**
  * Loads `path` from the API whenever it changes. `reload()` fetches again after a change.
  * Pass null to skip loading (for example until a filter is chosen).
  */
-export function useApi<T>(path: string | null): State<T> & { reload: () => void } {
-  const [state, setState] = useState<State<T>>({ data: undefined, error: null, loading: path !== null });
+export function useApi<T>(path: string | null): ApiState<T> {
   const [tick, setTick] = useState(0);
+  const [result, setResult] = useState<Result<T> | null>(null);
+  const key = path === null ? null : `${path}#${tick}`;
 
   useEffect(() => {
-    if (path === null) return;
+    if (path === null || key === null) return;
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true, error: null }));
     api<T>(path)
       .then((data) => {
-        if (!cancelled) setState({ data, error: null, loading: false });
+        if (!cancelled) setResult({ key, data, error: null });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof ApiError ? err.message : "Could not load data.";
-        setState({ data: undefined, error: message, loading: false });
+        setResult((prev) => ({ key, data: prev?.data, error: message }));
       });
     return () => {
       cancelled = true;
     };
-  }, [path, tick]);
+  }, [path, key]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { ...state, reload };
+  const current = key !== null && result?.key === key;
+
+  return {
+    data: result?.data,
+    error: current ? result.error : null,
+    loading: key !== null && !current,
+    reload,
+  };
 }
 
 /** Runs a write and returns an error message for the page to show, or null on success. */
