@@ -42,12 +42,16 @@ const ACTION_TEXT: Record<string, string> = {
 };
 
 export default function OverviewPage() {
-  const summary = useApi<Summary>("/admin/reports/summary");
-  const queue = useApi<QueueRow[]>("/admin/dispatch/queue");
-  const activity = useApi<ActivityRow[]>("/admin/activity?limit=8");
-  const openRides = useApi<Paged<{ id: string; status: string; passenger: { name: string }; driver: { name: string } | null; pickup: { address: string }; drop: { address: string } }>>(
-    "/admin/rides?status=assigned&pageSize=20",
+  const summary = useApi<Summary>("/admin/reports/summary", { pollMs: 15000 });
+  const queue = useApi<QueueRow[]>("/admin/dispatch/queue", { pollMs: 15000 });
+  const activity = useApi<ActivityRow[]>("/admin/activity?limit=8", { pollMs: 15000 });
+  // The API filters by one status at a time, so fetch recent rides and keep the ones with a driver.
+  const recent = useApi<Paged<{ id: string; status: string; passenger: { name: string }; driver: { name: string } | null; pickup: { address: string }; drop: { address: string } }>>(
+    "/admin/rides?pageSize=100",
+    { pollMs: 15000 },
   );
+  const withDriver = (recent.data?.data ?? []).filter((r) => ["assigned", "arrived", "in_progress"].includes(r.status));
+  const WITH_DRIVER_LABEL: Record<string, string> = { assigned: "Assigned", arrived: "Arrived", in_progress: "In progress" };
 
   const s = summary.data;
   const cards = [
@@ -83,7 +87,7 @@ export default function OverviewPage() {
             </Link>
           </div>
           <div className="space-y-2">
-            {(openRides.data?.data ?? []).map((r) => (
+            {withDriver.map((r) => (
               <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                 <div>
                   <p className="font-semibold">
@@ -93,10 +97,10 @@ export default function OverviewPage() {
                     {r.pickup.address} → {r.drop.address}
                   </p>
                 </div>
-                <StatusBadge value="Assigned" />
+                <StatusBadge value={WITH_DRIVER_LABEL[r.status] ?? r.status} />
               </div>
             ))}
-            {openRides.data && openRides.data.data.length === 0 ? <p className="text-sm text-slate-500">No rides waiting for pick-up.</p> : null}
+            {recent.data && withDriver.length === 0 ? <p className="text-sm text-slate-500">No rides with a driver right now.</p> : null}
           </div>
         </div>
 

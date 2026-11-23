@@ -21,17 +21,17 @@ const ONLINE_LABEL: Record<OnlineDriver["onlineStatus"], string> = {
 };
 
 export default function LivePage() {
-  const assigned = useApi<Paged<RideRow>>("/admin/rides?status=assigned&pageSize=100");
-  const arrived = useApi<Paged<RideRow>>("/admin/rides?status=arrived&pageSize=100");
-  const inProgress = useApi<Paged<RideRow>>("/admin/rides?status=in_progress&pageSize=100");
-  const drivers = useApi<Paged<OnlineDriver>>("/admin/drivers?onlineStatus=on_trip&pageSize=100");
-  const free = useApi<Paged<OnlineDriver>>("/admin/drivers?onlineStatus=online&pageSize=100");
+  const assigned = useApi<Paged<RideRow>>("/admin/rides?status=assigned&pageSize=100", { pollMs: 15000 });
+  const arrived = useApi<Paged<RideRow>>("/admin/rides?status=arrived&pageSize=100", { pollMs: 15000 });
+  const inProgress = useApi<Paged<RideRow>>("/admin/rides?status=in_progress&pageSize=100", { pollMs: 15000 });
+  const drivers = useApi<Paged<OnlineDriver>>("/admin/drivers?onlineStatus=on_trip&pageSize=100", { pollMs: 15000 });
+  const free = useApi<Paged<OnlineDriver>>("/admin/drivers?onlineStatus=online&pageSize=100", { pollMs: 15000 });
 
   const active = [...(assigned.data?.data ?? []), ...(arrived.data?.data ?? []), ...(inProgress.data?.data ?? [])];
   const onlineNow = [...(drivers.data?.data ?? []), ...(free.data?.data ?? [])];
 
   return (
-    <Shell title="Live" subtitle="Rides under way and drivers on the road" status="Refreshed when you open the page">
+    <Shell title="Live" subtitle="Rides under way and drivers on the road" status="Updates every 15 seconds">
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="card p-4">
           <p className="text-xs font-semibold uppercase text-slate-500">Rides under way</p>

@@ -21,11 +21,19 @@ export interface ApiState<T> {
 /**
  * Loads `path` from the API whenever it changes. `reload()` fetches again after a change.
  * Pass null to skip loading (for example until a filter is chosen).
+ * `pollMs` refetches on that interval, for screens that show live operations.
  */
-export function useApi<T>(path: string | null): ApiState<T> {
+export function useApi<T>(path: string | null, options: { pollMs?: number } = {}): ApiState<T> {
   const [tick, setTick] = useState(0);
   const [result, setResult] = useState<Result<T> | null>(null);
   const key = path === null ? null : `${path}#${tick}`;
+  const pollMs = options.pollMs;
+
+  useEffect(() => {
+    if (path === null || !pollMs) return;
+    const id = setInterval(() => setTick((t) => t + 1), pollMs);
+    return () => clearInterval(id);
+  }, [path, pollMs]);
 
   useEffect(() => {
     if (path === null || key === null) return;

@@ -24,10 +24,10 @@ const PRIORITY_LABEL: Record<DispatchRow["priority"], string> = {
 };
 
 export default function DispatchPage() {
-  const queue = useApi<DispatchRow[]>("/admin/dispatch/queue");
-  const open = useApi<Paged<RideRow>>("/admin/rides?status=assigned&pageSize=100");
-  const arrived = useApi<Paged<RideRow>>("/admin/rides?status=arrived&pageSize=100");
-  const inProgress = useApi<Paged<RideRow>>("/admin/rides?status=in_progress&pageSize=100");
+  const queue = useApi<DispatchRow[]>("/admin/dispatch/queue", { pollMs: 15000 });
+  const open = useApi<Paged<RideRow>>("/admin/rides?status=assigned&pageSize=100", { pollMs: 15000 });
+  const arrived = useApi<Paged<RideRow>>("/admin/rides?status=arrived&pageSize=100", { pollMs: 15000 });
+  const inProgress = useApi<Paged<RideRow>>("/admin/rides?status=in_progress&pageSize=100", { pollMs: 15000 });
   const [notice, setNotice] = useState<string | null>(null);
 
   const openRides = [...(open.data?.data ?? []), ...(arrived.data?.data ?? []), ...(inProgress.data?.data ?? [])];
