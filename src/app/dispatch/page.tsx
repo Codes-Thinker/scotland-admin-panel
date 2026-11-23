@@ -1,170 +1,144 @@
 "use client";
 
-import { useState } from "react";
 import { Shell } from "@/components/Shell";
 import { StatusBadge } from "@/components/ui";
-import { useAdminStore } from "@/lib/store";
+import {
+  assignRide,
+  cancelRide,
+  canCancel,
+  distanceText,
+  DriverPicker,
+  RIDE_STATUS_LABEL,
+  type DispatchRow,
+  type RideRow,
+  rideTypeText,
+} from "@/components/rides-shared";
+import { type Paged } from "@/lib/api";
+import { formatPounds, useApi } from "@/lib/use-api";
+import { useState } from "react";
+
+const PRIORITY_LABEL: Record<DispatchRow["priority"], string> = {
+  normal: "Normal",
+  high: "High",
+  sos: "SOS",
+};
 
 export default function DispatchPage() {
-  const { dispatchQueue, drivers, rides, dispatchJob, setRideStatus, assignDriver } = useAdminStore();
-  const [selected, setSelected] = useState<Record<string, string>>({});
-  const onlineDrivers = drivers.filter((d) => d.status === "Online");
-  const openRides = rides.filter((r) => ["Queued", "Dispatched", "Active"].includes(r.status));
+  const queue = useApi<DispatchRow[]>("/admin/dispatch/queue");
+  const open = useApi<Paged<RideRow>>("/admin/rides?status=assigned&pageSize=100");
+  const arrived = useApi<Paged<RideRow>>("/admin/rides?status=arrived&pageSize=100");
+  const inProgress = useApi<Paged<RideRow>>("/admin/rides?status=in_progress&pageSize=100");
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const openRides = [...(open.data?.data ?? []), ...(arrived.data?.data ?? []), ...(inProgress.data?.data ?? [])];
+  const waiting = queue.data ?? [];
+
+  function reloadAll() {
+    queue.reload();
+    open.reload();
+    arrived.reload();
+    inProgress.reload();
+  }
+
+  async function assign(rideId: string, driverId: string) {
+    setNotice(null);
+    const error = await assignRide(rideId, driverId);
+    if (error) setNotice(error);
+    reloadAll();
+  }
+
+  async function cancel(rideId: string) {
+    const reason = window.prompt("Reason for cancelling (the driver and passenger see it):") ?? "";
+    if (!reason.trim()) {
+      setNotice("A reason is needed to cancel a ride.");
+      return;
+    }
+    setNotice(null);
+    const error = await cancelRide(rideId, reason.trim());
+    if (error) setNotice(error);
+    reloadAll();
+  }
 
   return (
-    <Shell title="Dispatch" subtitle="Assign drivers, clear queue, update ride pipeline.">
+    <Shell title="Dispatch" subtitle="Assign waiting rides and watch the rides in progress" status="Live data from the operations API">
+      {notice ? <p className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{notice}</p> : null}
+      {queue.error ? <p className="mb-4 text-sm font-semibold text-rose-600">{queue.error}</p> : null}
+
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="card p-4">
-          <p className="text-xs font-semibold uppercase text-slate-500">Queue</p>
-          <p className="text-3xl font-extrabold">{dispatchQueue.length}</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">Waiting for a driver</p>
+          <p className="text-3xl font-extrabold">{waiting.length}</p>
         </div>
         <div className="card p-4">
-          <p className="text-xs font-semibold uppercase text-slate-500">Online drivers</p>
-          <p className="text-3xl font-extrabold text-[#8FBF1F]">{onlineDrivers.length}</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">Driver on the way</p>
+          <p className="text-3xl font-extrabold text-[#2563EB]">{(open.data?.total ?? 0) + (arrived.data?.total ?? 0)}</p>
         </div>
         <div className="card p-4">
-          <p className="text-xs font-semibold uppercase text-slate-500">Open rides</p>
-          <p className="text-3xl font-extrabold text-[#2563EB]">{openRides.length}</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">In progress</p>
+          <p className="text-3xl font-extrabold text-[#8FBF1F]">{inProgress.data?.total ?? 0}</p>
         </div>
       </div>
 
-      <h2 className="mb-3 text-lg font-extrabold">Dispatch queue</h2>
+      <h2 className="mb-3 text-lg font-extrabold">Waiting for a driver</h2>
       <div className="mb-8 space-y-3">
-        {dispatchQueue.map((job) => (
+        {waiting.map((job) => (
           <div key={job.id} className="card p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="mb-1 flex items-center gap-2">
-                  <p className="font-extrabold">
-                    {job.rideId} · {job.passenger}
-                  </p>
-                  <StatusBadge value={job.priority} />
-                  <StatusBadge value={job.type} />
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <p className="font-extrabold">{job.passenger.name}</p>
+                  <StatusBadge value={PRIORITY_LABEL[job.priority]} />
+                  <StatusBadge value={rideTypeText(job)} />
                 </div>
                 <p className="text-sm text-slate-600">
-                  {job.pickup} → {job.destination}
+                  {job.pickup.address} → {job.drop.address} · {distanceText(job.distanceM)}
                 </p>
-                <p className="text-xs text-slate-500">Waiting {job.waitingSec}s · suggested {job.suggestedDriver}</p>
+                <p className="text-xs text-slate-500">
+                  Waiting {job.waitingSeconds}s · {job.offersOpen} driver{job.offersOpen === 1 ? "" : "s"} holding an offer
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <select
-                  className="select"
-                  value={selected[job.id] ?? job.suggestedDriver}
-                  onChange={(e) => setSelected((s) => ({ ...s, [job.id]: e.target.value }))}
-                >
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.name}>
-                      {d.name} ({d.status})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn-lime"
-                  onClick={() => dispatchJob(job.id, selected[job.id] ?? job.suggestedDriver)}
-                >
-                  Dispatch now
-                </button>
+                <DriverPicker onPick={(driverId) => assign(job.id, driverId)} placeholder="Dispatch to…" />
+                {canCancel(job.status) ? (
+                  <button className="btn-danger" onClick={() => cancel(job.id)}>
+                    Cancel
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
         ))}
-        {dispatchQueue.length === 0 ? (
+        {!queue.loading && waiting.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
-            Queue empty — all jobs assigned.
+            Nothing waiting. Every requested ride has a driver.
           </p>
         ) : null}
       </div>
 
-      <h2 className="mb-3 text-lg font-extrabold">Open rides pipeline</h2>
-      <div className="space-y-3 lg:hidden">
+      <h2 className="mb-3 text-lg font-extrabold">Rides under way</h2>
+      <div className="space-y-3">
         {openRides.map((r) => (
-          <div key={r.id} className="card space-y-3 p-4">
-            <div className="flex items-start justify-between gap-2">
+          <div key={r.id} className="card flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
               <p className="font-extrabold">
-                {r.id} · {r.passenger}
+                {r.passenger.name} → {r.driver?.name ?? "—"}
               </p>
-              <StatusBadge value={r.status} />
+              <p className="text-sm text-slate-600">
+                {r.pickup.address} → {r.drop.address}
+              </p>
+              <p className="text-xs text-slate-500">{formatPounds(r.fareEstimatePence)} estimate</p>
             </div>
-            <p className="text-sm text-slate-600">
-              {r.pickup} → {r.destination}
-            </p>
-            <p className="text-sm">Driver: {r.driver || "Unassigned"}</p>
-            <div className="flex flex-wrap gap-2">
-              <select
-                className="select w-full"
-                defaultValue=""
-                onChange={(e) => {
-                  const d = drivers.find((x) => x.id === e.target.value);
-                  if (d) assignDriver(r.id, d.name, d.id);
-                }}
-              >
-                <option value="">Assign…</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-              <button className="btn-blue" onClick={() => setRideStatus(r.id, "Active")}>Active</button>
-              <button className="btn-lime" onClick={() => setRideStatus(r.id, "Completed")}>Complete</button>
-              <button className="btn-danger" onClick={() => setRideStatus(r.id, "Cancelled")}>Cancel</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge value={RIDE_STATUS_LABEL[r.status]} />
+              {canCancel(r.status) ? (
+                <button className="btn-danger" onClick={() => cancel(r.id)}>
+                  Cancel
+                </button>
+              ) : null}
             </div>
           </div>
         ))}
-      </div>
-
-      <div className="card hidden overflow-hidden lg:block">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Ride</th>
-                <th className="px-4 py-3">Passenger</th>
-                <th className="px-4 py-3">Driver</th>
-                <th className="px-4 py-3">Route</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {openRides.map((r) => (
-                <tr key={r.id} className="border-b border-slate-100">
-                  <td className="px-4 py-3 font-semibold">{r.id}</td>
-                  <td className="px-4 py-3">{r.passenger}</td>
-                  <td className="px-4 py-3">{r.driver || "—"}</td>
-                  <td className="px-4 py-3">
-                    {r.pickup} → {r.destination}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge value={r.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      <select
-                        className="select"
-                        defaultValue=""
-                        onChange={(e) => {
-                          const d = drivers.find((x) => x.id === e.target.value);
-                          if (d) assignDriver(r.id, d.name, d.id);
-                        }}
-                      >
-                        <option value="">Assign…</option>
-                        {drivers.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button className="btn-blue" onClick={() => setRideStatus(r.id, "Active")}>Active</button>
-                      <button className="btn-lime" onClick={() => setRideStatus(r.id, "Completed")}>Complete</button>
-                      <button className="btn-danger" onClick={() => setRideStatus(r.id, "Cancelled")}>Cancel</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {openRides.length === 0 ? <p className="text-slate-500">No rides under way.</p> : null}
       </div>
     </Shell>
   );

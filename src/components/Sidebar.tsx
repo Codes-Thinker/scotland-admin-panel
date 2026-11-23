@@ -129,8 +129,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         <p className="text-lg font-extrabold tracking-tight text-[#1A1A1A]">Fife Nearby Taxis</p>
         <p className="text-xs text-[#6B7280]">Admin console</p>
         <div className="mt-4 rounded-xl border border-[#8FBF1F]/35 bg-[#F4F9D8] px-3 py-2">
-          <p className="text-sm font-semibold text-[#1A1A1A]">Live mock data</p>
-          <p className="text-xs text-[#6B7280]">Interactive · no login</p>
+          <p className="text-sm font-semibold text-[#1A1A1A]">Live operations API</p>
+          <p className="text-xs text-[#6B7280]">Administrators only</p>
         </div>
       </div>
 

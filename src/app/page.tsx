@@ -3,46 +3,68 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { StatusBadge } from "@/components/ui";
-import { useAdminStore } from "@/lib/store";
+import { type Paged } from "@/lib/api";
+import { formatDate, formatPounds, useApi } from "@/lib/use-api";
 
-export default function DashboardPage() {
-  const { users, drivers, rides, payments, dispatchQueue, activities } = useAdminStore();
+interface Summary {
+  range: { from: string; to: string };
+  rides: { total: number; completed: number; cancelled: number; open: number; cancellationRate: number; averageWaitSeconds: number | null };
+  revenue: { completedFarePence: number; paidPence: number; pendingPence: number };
+  drivers: { approved: number; online: number; pendingApproval: number; averageRating: number | null };
+}
 
-  const passengers = users.filter((u) => u.role === "Passenger");
-  const driverUsers = users.filter((u) => u.role === "Driver");
-  const completed = rides.filter((r) => r.status === "Completed");
-  const incomplete = rides.filter((r) => !["Completed", "Cancelled"].includes(r.status));
-  const cancelled = rides.filter((r) => r.status === "Cancelled");
-  const revenue = payments.filter((p) => p.status === "Paid").reduce((s, p) => s + p.amount, 0);
-  const pendingPay = payments.filter((p) => p.status === "Pending").reduce((s, p) => s + p.amount, 0);
-  const online = drivers.filter((d) => d.status === "Online" || d.status === "On trip").length;
+interface ActivityRow {
+  id: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  createdAt: string;
+  actorName: string | null;
+}
 
+interface QueueRow {
+  id: string;
+  passenger: { name: string };
+  pickup: { address: string };
+  drop: { address: string };
+  priority: "normal" | "high" | "sos";
+  waitingSeconds: number;
+}
+
+const ACTION_TEXT: Record<string, string> = {
+  "user.status_changed": "changed an account status",
+  "driver_document.reviewed": "reviewed a driver document",
+  "driver_document.viewed": "opened a driver document",
+  "ride.assigned": "assigned a driver to a ride",
+  "ride.cancelled": "cancelled a ride",
+  "payment.status_changed": "changed a payment status",
+  "pricing.replaced": "updated pricing",
+};
+
+export default function OverviewPage() {
+  const summary = useApi<Summary>("/admin/reports/summary");
+  const queue = useApi<QueueRow[]>("/admin/dispatch/queue");
+  const activity = useApi<ActivityRow[]>("/admin/activity?limit=8");
+  const openRides = useApi<Paged<{ id: string; status: string; passenger: { name: string }; driver: { name: string } | null; pickup: { address: string }; drop: { address: string } }>>(
+    "/admin/rides?status=assigned&pageSize=20",
+  );
+
+  const s = summary.data;
   const cards = [
-    { label: "Users", value: users.length, hint: `${passengers.length} passengers · ${driverUsers.length} drivers`, href: "/users", tone: "bg-[#F4F9D8]" },
-    { label: "Passengers", value: passengers.length, hint: `${passengers.filter((p) => p.status === "Active").length} active`, href: "/passengers", tone: "bg-white" },
-    { label: "Drivers", value: drivers.length, hint: `${online} online / on trip`, href: "/drivers", tone: "bg-white" },
-    { label: "Rides total", value: rides.length, hint: `${completed.length} complete · ${incomplete.length} open`, href: "/rides", tone: "bg-white" },
-    { label: "Completed", value: completed.length, hint: "Finished successfully", href: "/rides", tone: "bg-emerald-50" },
-    { label: "Incomplete", value: incomplete.length, hint: "Queued / active / dispatched", href: "/dispatch", tone: "bg-amber-50" },
-    { label: "Cancelled", value: cancelled.length, hint: "Dropped rides", href: "/rides", tone: "bg-rose-50" },
-    { label: "Dispatch queue", value: dispatchQueue.length, hint: "Waiting assignment", href: "/dispatch", tone: "bg-blue-50" },
-    { label: "Revenue paid", value: `£${revenue.toFixed(2)}`, hint: `Pending £${pendingPay.toFixed(2)}`, href: "/payments", tone: "bg-white" },
-    { label: "Reports", value: "Ready", hint: "Export analytics", href: "/reports", tone: "bg-[#F4F9D8]" },
+    { label: "Rides (30 days)", value: s?.rides.total ?? "—", hint: `${s?.rides.completed ?? 0} completed · ${s?.rides.open ?? 0} open`, href: "/rides", tone: "bg-[#F4F9D8]" },
+    { label: "Completed", value: s?.rides.completed ?? "—", hint: "Finished successfully", href: "/rides", tone: "bg-emerald-50" },
+    { label: "Cancelled", value: s?.rides.cancelled ?? "—", hint: `${Math.round((s?.rides.cancellationRate ?? 0) * 100)}% of rides`, href: "/rides", tone: "bg-rose-50" },
+    { label: "Waiting for a driver", value: queue.data?.length ?? "—", hint: "Dispatch queue", href: "/dispatch", tone: "bg-blue-50" },
+    { label: "Paid (30 days)", value: formatPounds(s?.revenue.paidPence), hint: `Pending ${formatPounds(s?.revenue.pendingPence)}`, href: "/payments", tone: "bg-white" },
+    { label: "Drivers online", value: s?.drivers.online ?? "—", hint: `${s?.drivers.approved ?? 0} approved drivers`, href: "/drivers", tone: "bg-white" },
+    { label: "Awaiting approval", value: s?.drivers.pendingApproval ?? "—", hint: "Driver accounts to review", href: "/drivers", tone: "bg-amber-50" },
   ];
 
   return (
-    <Shell title="Overview dashboard" subtitle="Fully interactive operations console — matches mobile app colors.">
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-2xl font-extrabold">Operations hub</p>
-          <p className="text-sm text-slate-500">Tap any card to open that module. Actions update live across pages.</p>
-        </div>
-        <Link href="/dispatch" className="btn-lime">
-          Open dispatch
-        </Link>
-      </div>
+    <Shell title="Overview" subtitle="Operations at a glance" status={s ? `Figures for ${s.range.from} to ${s.range.to}` : "Loading figures…"}>
+      {summary.error ? <p className="mb-4 text-sm font-semibold text-rose-600">{summary.error}</p> : null}
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (
           <Link key={c.label} href={c.href} className={`card p-4 transition hover:border-[#8FBF1F] ${c.tone}`}>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{c.label}</p>
@@ -55,79 +77,63 @@ export default function DashboardPage() {
       <div className="mb-6 grid gap-4 lg:grid-cols-3">
         <div className="card p-4 lg:col-span-2">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-extrabold">Open rides (incomplete)</h2>
-            <Link href="/rides" className="text-sm font-semibold text-[#2563EB]">
-              View all
+            <h2 className="font-extrabold">Rides with a driver</h2>
+            <Link href="/dispatch" className="text-sm font-semibold text-[#2563EB]">
+              Open dispatch
             </Link>
           </div>
           <div className="space-y-2">
-            {incomplete.map((r) => (
+            {(openRides.data?.data ?? []).map((r) => (
               <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                 <div>
                   <p className="font-semibold">
-                    {r.id} · {r.passenger} → {r.driver || "Unassigned"}
+                    {r.passenger.name} → {r.driver?.name ?? "Unassigned"}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {r.pickup} → {r.destination} · {r.type} · {r.distance}
+                    {r.pickup.address} → {r.drop.address}
                   </p>
                 </div>
-                <StatusBadge value={r.status} />
+                <StatusBadge value="Assigned" />
               </div>
             ))}
-            {incomplete.length === 0 ? <p className="text-sm text-slate-500">No open rides.</p> : null}
+            {openRides.data && openRides.data.data.length === 0 ? <p className="text-sm text-slate-500">No rides waiting for pick-up.</p> : null}
           </div>
         </div>
 
         <div className="card p-4">
-          <h2 className="mb-3 font-extrabold">Live activity</h2>
+          <h2 className="mb-3 font-extrabold">Recent activity</h2>
           <ul className="space-y-2 text-sm text-slate-600">
-            {activities.map((a) => (
-              <li key={a} className="rounded-lg bg-[#F4F9D8]/70 px-3 py-2">
-                {a}
+            {(activity.data ?? []).map((a) => (
+              <li key={a.id} className="rounded-lg bg-[#F4F9D8]/70 px-3 py-2">
+                <span className="font-semibold">{a.actorName ?? "System"}</span> {ACTION_TEXT[a.action] ?? a.action}
+                <span className="block text-xs text-slate-500">{formatDate(a.createdAt)}</span>
               </li>
             ))}
+            {activity.data && activity.data.length === 0 ? <li className="text-slate-500">No activity yet.</li> : null}
           </ul>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-4">
-          <h2 className="mb-3 font-extrabold">Driver readiness</h2>
-          <div className="space-y-2">
-            {drivers.map((d) => (
-              <div key={d.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2">
-                <div>
-                  <p className="font-semibold">{d.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {d.zone} · {d.vehicle} · ★ {d.rating}
-                  </p>
-                </div>
-                <StatusBadge value={d.status} />
-              </div>
-            ))}
-          </div>
+      <div className="card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-extrabold">Dispatch waiting</h2>
+          <Link href="/dispatch" className="text-sm font-semibold text-[#8FBF1F]">
+            Manage
+          </Link>
         </div>
-        <div className="card p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-extrabold">Dispatch waiting</h2>
-            <Link href="/dispatch" className="text-sm font-semibold text-[#8FBF1F]">
-              Manage
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {dispatchQueue.map((j) => (
-              <div key={j.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="font-semibold">{j.passenger}</p>
-                  <StatusBadge value={j.priority} />
-                </div>
-                <p className="text-xs text-slate-500">
-                  {j.pickup} → {j.destination} · wait {j.waitingSec}s · suggest {j.suggestedDriver}
-                </p>
+        <div className="space-y-2">
+          {(queue.data ?? []).map((j) => (
+            <div key={j.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="font-semibold">{j.passenger.name}</p>
+                <StatusBadge value={j.priority === "sos" ? "SOS" : j.priority === "high" ? "High" : "Normal"} />
               </div>
-            ))}
-            {dispatchQueue.length === 0 ? <p className="text-sm text-slate-500">Queue clear.</p> : null}
-          </div>
+              <p className="text-xs text-slate-500">
+                {j.pickup.address} → {j.drop.address} · waiting {j.waitingSeconds}s
+              </p>
+            </div>
+          ))}
+          {queue.data && queue.data.length === 0 ? <p className="text-sm text-slate-500">Queue clear.</p> : null}
         </div>
       </div>
     </Shell>
